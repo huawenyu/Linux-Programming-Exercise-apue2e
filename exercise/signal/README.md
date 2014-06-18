@@ -1,0 +1,307 @@
+# signal discuss
+
+[simple-linux-signal-handling](http://stackoverflow.com/questions/17942034/simple-linux-signal-handling)
+
+I have a program that creates many threads and runs until either power is shutdown to the embedded computer, or the user uses kill or ctrlc to terminate the process.
+
+Here's some code and how the main() looks.
+
+```
+static int terminate = 0;  // does this need to be volatile?
+static void sighandler(int signum) { terminate = 1; }
+
+int main() {
+  signal(SIGINT, sighandler);
+  // ...
+  // create objects, spawn threads + allocate dynamic memory
+  // ...
+  while (!terminate) sleep(2);
+  // ...
+  // clean up memory, close threads, etc.
+  // ...
+  signal(SIGINT, SIG_DFL);  // is this necessary?
+}
+```
+## I'm wondering a few things:
+  - Q1, Is any signal handling necessary? Apparently the OS will handle cleanup for me. Therefore, can I just replace the signal handler with just an infinite loop and let the OS gracefully exit the threads, de-allocate the memory, etc?
+  - Q2, Are there any other signals that I need to be concerned with regarding clean termination? This thread "How does SIGINT relate to the other termination signals?", was useful to list all the signals I may be concerned with, but how many actually required handling?
+  - Q3, Does the terminate variable in my example have to be volatile? I've seen many examples where this variable is volatile, and others where it is not.
+  - Q4, I've read that signal() is now deprecated, and to use sigaction(). Are there any really good examples to show how to convert from the previous signal() call? I'm having trouble with the new structure that I have to create/pass and how it all fits together.
+  - Q5, Is the second call to signal() necessary? Is there something similar that I need to be concerned with for sigaction()?
+  - Q6, To be clear, all I'm trying to accomplish to to have my: main loop run until either ctrl-c or power is disconnected or something really bad happens.
+
+## Answer
+
+1. Is any signal handling necessary?
+
+In the particular case of the link you posted, yes. The runs of softwares that concerns network need particular operations, as warning client of the close of a socket by example, in order to not disturb its run.
+In your particular case, you don't need to handle any signal for the process to be clear gracefully : your OS will do it for you.
+
+[Q-1a] Is any signal handling necessary?
+
+Yes, Linux will do cleanup for you. For example if you don't close a file or a socket, Linux will do the cleanup after the process terminates. But Linux may not necessary perform the clean up immediately and it may take some time (may be to keep system performance high or some other issues). For example if you don't close a tcp-socket and the program terminates the kernel will not close the socket immediately to ensure all data has been transmitted, TCP guarantees delivery if possible.
+
+[Q-1b] Therefore, can I just replace the signal handler with just an infinite loop and let the OS gracefully exit the threads, de-allocate the memory, etc?
+
+No, operating system performs do clean-up only after program terminates. While a process executes, resources that are allocated to that process don't get claimed by the OS. (The OS can't know whether your process is in an infinite loop or not - this is an unsolvable problem). If you want that after process termination the OS performs the clean-up operations for you, then you don't need to handle signals (even in case your process abnormally terminated by a signal).
+
+2. Are there any other signals that I need to be concerned with regarding clean termination?
+
+First, take a look at his page : [The GNU Library Signals](http://www.cs.utah.edu/dept/old/texinfo/glibc-manual-0.02/library_21.html#SEC337) The termination signals is what you look after. But take a look at SIGUSR1 and SIGUSR2, even if you 'll never find them in any software, except for debugging purposes.
+
+All of this termination signals need to be handled if you don't want your soft to terminate all of a sudden.
+
+3. Does the terminate variable in my example have to be volatile?
+
+The flag terminate should be volatile sig_atomic_t:
+
+Because handler functions can be called asynchronously. That is, a handler might be called at any point in the program, unpredictably. If two signals arrive during a very short interval, one handler can run within another. And it is considered better practice to declare volatile sig_atomic_t, this type are always accessed atomically, avoid uncertainty about interrupting access to a variable. volatile tells the compiler not to optimize and put it into register.
+(read: [Atomic Data Access and Signal Handling](http://www.cs.utah.edu/dept/old/texinfo/glibc-manual-0.02/library_21.html#SEC358) for detail expiation).
+One more reference: [24.4.7 Atomic Data Access and Signal Handling](http://www.gnu.org/software/libc/manual/html_node/Atomic-Data-Access.html#Atomic-Data-Access). Furthermore, the C11 standard in 7.14.1.1-5 indicates that only objects of volatile sig_atomic_t can be accessed from a signal handler (accessing others has undefined behavior).
+
+4. I've read that signal() is now deprecated, and to use sigaction()
+
+Sigaction() is POSIX while signal is a C standard.
+
+```
+// 1. Prepare struct 
+struct sigaction sa;
+sa.sa_handler =  sighandler;
+
+// 2. To restart functions if interrupted by handler (as handlers called asynchronously)
+sa.sa_flags = SA_RESTART; 
+
+// 3. Set zero 
+sigemptyset(&sa.sa_mask);
+
+/* 3b. 
+ // uncomment if you wants to block 
+ // some signals while one is executing. 
+sigaddset( &sa.sa_mask, SIGINT );
+*/ 
+
+// 4. Register signals 
+sigaction( SIGINT, &sa, NULL );
+```
+
+5. Is the second call to signal() necessary? Is there something similar that I need to be concerned with for sigaction()?
+
+Why you set it to default-action before program termination is unclear to me. I think the following paragraph will give you an answer:
+
+[Handling Signals](http://support.sas.com/documentation/onlinedoc/sasc/doc750/html/lr1/z1ling.htm)
+
+The call to signal establishes signal handling for only one occurrence of a signal. Before the signal-handling function is called, the library resets the signal so that the default action is performed if the same signal occurs again. Resetting signal handling helps to prevent an infinite loop if, for example, an action performed in the signal handler raises the same signal again. If you want your handler to be used for a signal each time it occurs, you must call signal within the handler to reinstate it. You should be cautious in reinstating signal handling. For example, if you continually reinstate SIGINT handling, you may lose the ability to interrupt and terminate your program.
+
+The signal() function defines the handler of the next received signal only, after which the default handler is reinstated. So it is necessary for the signal handler to call signal() if the program needs to continue handling signals using a non-default handler.
+
+Read a discussion for further reference: [When to re-enable signal handlers](http://cboard.cprogramming.com/linux-programming/150239-when-re-enable-signal-handlers.html).
+
+```
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+/* This flag controls termination of the main loop. */
+volatile sig_atomic_t keep_going = 1;
+
+/* The signal handler just clears the flag and re-enables itself. */
+void
+catch_alarm (int sig)
+{
+  keep_going = 0;
+  signal (sig, catch_alarm);
+}
+
+void
+do_stuff (void)
+{
+  puts ("Doing stuff while waiting for alarm....");
+}
+
+int
+main (void)
+{
+  /* Establish a handler for SIGALRM signals. */
+  signal (SIGALRM, catch_alarm);
+
+  /* Set an alarm to go off in a little while. */
+  alarm (2);
+
+  /* Check the flag once in a while to see when to quit. */
+  while (keep_going)
+    do_stuff ();
+
+  return EXIT_SUCCESS;
+}
+```
+- PS: a user in IRC told me "It's necessary on some platforms (implementation-defined when) with signal(). But sigaction() should avoid that issue." Is this true?
+  + The "user in IRC" is mistaken.
+  + The signal() function defines the handling of the next received signal only, after which the default handling is reinstated. So it is necessary for the signal handler to call signal() if the program needs to continue handling signals using a non-default handler.
+  + signal() is specified in the C standard. sigaction() is not (albeit, it is considered a better approach by some). So, yes, sigaction() will avoid the need for calling signal(). sigaction() also handles situations where a second signal comes in while handling a signal. The potential catch is that sigaction() is also not available on all target systems.
+  + There are some signals that cannot be handled. There are also some signals that leave the process in an unpredictable state if the signal handler does not terminate (i.e. if the handler is used to effectively ignore the signal).
+
+6. How about just let OS do the left things?
+
+No, there is a limitation! You can't catch all signals. Some signals are not catchable e.g. SIGKILL and SIGSTOP and both are termination signals. Quoting one:
+
+— [Macro: int SIGKILL](http://www.gnu.org/software/libc/manual/html_node/Termination-Signals.html)
+
+The SIGKILL signal is used to cause immediate program termination. It cannot be handled or ignored, and is therefore always fatal. It is also not possible to block this signal.
+
+So you can't make [a program that cannot be interrupted (an uninterrupted program)](http://stackoverflow.com/questions/12437648/uninterruptable-process-in-windowsor-linux)!
+
+```
+#include<stdio.h>
+#include<signal.h>
+#include<unistd.h>
+
+void sig_handler(int signo)
+{
+    if (signo == SIGUSR1)
+        printf("received SIGUSR1\n");
+    else if (signo == SIGKILL)
+        printf("received SIGKILL\n");
+    else if (signo == SIGSTOP)
+        printf("received SIGSTOP\n");
+}
+
+int main(void)
+{
+    if (signal(SIGUSR1, sig_handler) == SIG_ERR)
+        printf("\ncan't catch SIGUSR1\n");
+    if (signal(SIGKILL, sig_handler) == SIG_ERR)
+        printf("\ncan't catch SIGKILL\n");
+    if (signal(SIGSTOP, sig_handler) == SIG_ERR)
+        printf("\ncan't catch SIGSTOP\n");
+    // A long long wait so that we can easily issue a signal to this process
+    while(1) 
+        sleep(1);
+    return 0;
+}
+
+OUTPUT:
+$ kill -USR1 2678
+$ ./sigfunc
+can't catch SIGKILL
+can't catch SIGSTOP
+received SIGUSR1
+```
+
+# Linux signals
+
+## What is signaled in Linux
+
+Your process may receive a signal when:
+- From user space from some other process when someone calls a function like kill(2).
+- When you send the signal from the process itself using a function like abort(3).
+- When a child process exits the operating system sends the SIGCHLD signal.
+- When the parent process dies or hangup is detected on the controlling terminal SIGHUP is sent.
+- When user interrupts program from the keyboard SIGINT is sent.
+- When the program behaves incorrectly one of SIGILL, SIGFPE, SIGSEGV is delivered.
+- When a program accesses memory that is mapped using mmap(2) but is not available (for example when the file was truncated by another process) - really nasty situation when using mmap() to access files. There is no good way to handle this case.
+- When a profiler like gprof is used the program occasionally receives SIGPROF. This is sometimes problematic when you forgot to handle interrupting system functions like read(2) properly (errno == EINTR).
+- When you use the write(2) or similar data sending functions and there is nobody to receive your data SIGPIPE is delivered. This is a very common case and you must remember that those functions may not only exit with error and setting the errno variable but also cause the SIGPIPE to be delivered to the program. An example is the case when you write to the standard output and the user uses the pipeline sequence to redirect your output to another program. If the program exits while you are trying to send data SIGPIPE is sent to your process. A signal is used in addition to the normal function return with error because this event is asynchronous and you can't actually tell how much data has been successfully sent. This can also happen when you are sending data to a socket. This is because data are buffered and/or send over a wire so are not delivered to the target immediately and the OS can realize that can't be delivered after the sending function exits.
+- For a complete list of signals see the signal(7) manual page.
+
+## Signal handlers
+
+Traditional signal() is deprecated
+
+The signal(2) function is the oldest and simplest way to install a signal handler but it's deprecated. There are few reasons and most important is that the original Unix implementation would reset the signal handler to it's default value after signal is received. If you need to handle every signal delivered to your program separately like handling SIGCHLD to catch a dying process there is a race here. To do so you would need to set to signal handler again in the signal handler itself and another signal may arrive before you cal the signal(2) function. This behavior varies across different systems. Moreover, it lacks features present in sigaction(2) you will sometimes need.
+The recommended way of setting signal actions: sigaction
+
+The sigaction(2) function is a better way to set the signal action. It has the prototype:
+```
+int sigaction (int signum, const struct sigaction *act, struct sigaction *oldact);
+```
+As you can see you don't pass the pointer to the signal handler directly, but instead a struct sigaction object. It's defined as:
+```
+struct sigaction {
+        void     (*sa_handler)(int);
+        void     (*sa_sigaction)(int, siginfo_t *, void *);
+        sigset_t   sa_mask;
+        int        sa_flags;
+        void     (*sa_restorer)(void);
+};
+```
+For a detailed description of this structure's fields see the sigaction(2) manual page. Most important fields are:
+- sa_handler - This is the pointer to your handler function that has the same prototype as a handler for signal(2).
+- sa_sigaction - This is an alternative way to run the signal handler. It has two additional arguments beside the signal number where the siginfo_t * is the more interesting. It provides more information about the received signal, I will describe it later.
+- sa_mask allows you to explicitly set signals that are blocked during the execution of the handler. In addition if you don't use the SA_NODEFER flag the signal which triggered will be also blocked.
+- sa_flags allow to modify the behavior of the signal handling process. For the detailed description of this field, see the manual page. To use the sa_sigaction handler you must use SA_SIGINFO flag here.
+
+What is the difference between signal(2) and sigaction(2) if you don't use any additional feature the later one provides? The answer is: portability and no race conditions. The issue with resetting the signal handler after it's called doesn't affect sigaction(2), because the default behavior is not to reset the handler and blocking the signal during it's execution. So there is no race and this behavior is documented in the POSIX specification. Another difference is that with signal(2) some system calls are automatically restarted and with sigaction(2) they're not by default.
+
+## Example use of sigaction()
+
+See example of using sigaction() to set a signal handler with additional parameters.
+In this example we use the three arguments version of signal handler for SIGTERM. Without setting the SA_SIGINFO flag we would use a traditional one argument version of the handler and pass the pointer to it by the sa_handler field. It would be a replacement for signal(2). You can try to run it and do kill PID to see what happens.
+
+In the signal handler we read two fields from the siginfo_t \*siginfo parameter to read the sender's PID and UID. This structure has more fields, I'll describe them later.
+
+The sleep(3) function is used in a loop because it's interrupted when the signal arrives and must be called again.
+
+SA_SIGINFO handler
+
+In the previous example SA_SIGINFO is used to pass more information to the signal handler as arguments. We've seen that the siginfo_t structure contains si_pid and si_uid fields (PID and UID of the process that sends the signal), but there are many more. They are all described in sigaction(2) manual page. On Linux only si_signo (signal number) and si_code (signal code) are available for all signals. Presence of other fields depends on the signal type. Some other fields are:
+si_code - Reason why the signal was sent. It may be SI_USER if it was delivered due to kill(2) or raise(3), SI_KERNEL if kernel sent it and few more. For some signals there are special values like ILL_ILLADR telling you that SIGILL was sent due to illegal addressing mode.
+For SIGCHLD fields si_status, si_utime, si_stime are filled and contain information about the exit status or the signal of the dying process, user and system time consumed.
+In case of SIGILL, SIGFPE, SIGSEGV, SIGBUS si_addr contains the memory address that caused the fault.
+We'll see more examples of use of siginfo_t later.
+
+Compiler optimization and data in signal handler
+
+Let's see the following example:
+```
+#include <stdio.h>
+#include <unistd.h>
+#include <signal.h>
+#include <string.h>
+ 
+static int exit_flag = 0;
+ 
+static void hdl (int sig)
+{
+	exit_flag = 1;
+}
+ 
+int main (int argc, char *argv[])
+{
+	struct sigaction act;
+ 
+	memset (&act, '\0', sizeof(act));
+	act.sa_handler = &hdl;
+	if (sigaction(SIGTERM, &act, NULL) < 0) {
+		perror ("sigaction");
+		return 1;
+	}
+ 
+	while (!exit_flag)
+		;
+ 
+	return 0;
+}
+```
+What it does? It depends on compiler optimization settings. Without optimization it executes a loop that ends when the process receives SIGTERM or other sgnal that terminates the process and was not handler. When you compile it with the -O3 gcc flag it will not exit after receiving SIGTERM. Why? because whe while loop is optimized in such way that the exit_flag variable is loaded into a processor register once and not read from the memory in the loop. The compiler isn't aware that the loop is not the only place where the program accesses this variable while running the loop. In such cases - modifying a variable in a signal handler that is also accessed in some other parts of the program you must remember to instruct the compiler to always access this variable in memory when reading or writing them. You should use the volatile keyword in the variable declaration:
+static volatile int exit_flag = 0;
+
+After this change everything works as expected.
+
+## Atomic Type
+
+There is one data type defined that is guaranteed to be atomically read and written both in signal handlers and code that uses it: sig_atomic_t. The size of this type is undefined, but it's an integer type. In theory this is the only type you can safely assign and read if it's also accessed in signal handlers. Keep in mind that:
+It doesn't work like a mutex: it's guaranteed that read or write of this type translates into an uninterruptible operation but code such as:
+```
+sig_atomic_t i = 0;
+void sig_handler (int sig)
+{
+	if (i++ == 5) {
+		// ...
+	}
+}
+```
+Isn't safe: there is read and update in the if operation but only single reads and single writes are atomic.
+
+Don't try to use this type in a multi-threaded program as a type that can be used without a mutex. It's only intended for signal handlers and has nothing to do with mutexes!
+You don't need to worry if data are modified or read in a signal handler are also modified or read in the program if it happens only in parts where the signal is blocked. Later I'll show how to block signals. But you will still need the volatile keyword.
+
