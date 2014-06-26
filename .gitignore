@@ -1,0 +1,34 @@
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+*.dep
+
+# Libraries
+*.lib
+*.a
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+out_debug
+out_release
+out_profile
+
+# local temp files
+*.vim
+*.log
+log*
+*TAGS
+*cscope.files
