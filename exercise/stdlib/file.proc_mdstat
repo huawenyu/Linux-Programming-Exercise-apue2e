@@ -1,0 +1,9 @@
+Personalities : [raid0] [raid1] [raid5]
+read_ahead 1024 sectors
+md0 : active raid0 sde[0] sdf[1]
+      250090496 blocks 64k chunks
+
+md1 : active raid5 sda[0] sdd[3] sdc[2] sdb[1]
+      187567872 blocks level 5, 64k chunk, algorithm 2 [4/4] [UUUU]
+      [=>...................]  resync =  8.6% (5430952/62522624) finish=28.9min speed=32835K/sec
+unused devices: <none>
