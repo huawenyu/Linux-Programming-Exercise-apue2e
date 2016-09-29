@@ -82,19 +82,19 @@ int main (int argc, char *argv[])
 
 		/* BANG! we can get SIGTERM at this point. */
 
-		FD_ZERO (&fds);
-		FD_SET (lfd, &fds);
+		FD_ZERO(&fds);
+		FD_SET(lfd, &fds);
 
 		res = select (lfd + 1, &fds, NULL, NULL, NULL);
 		if (res < 0 && errno != EINTR) {
 			perror ("select");
 			return 1;
 		}
-		else if (exit_request) {
+		else if (exit_request) { /* EINTR */
 			puts ("exit");
 			break;
 		}
-		else if (res == 0)
+		else if (res == 0) /* timeout */
 			continue;
 
 		if (FD_ISSET(lfd, &fds)) {
