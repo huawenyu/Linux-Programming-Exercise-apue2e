@@ -36,10 +36,10 @@ There is a specific case in which the signal will not interrupt the program util
 
 If we can block that signal util sleep by select(2):
   - block that signal,
-  - call select() to wait event, at the sametime unblock that signal, if have that signal when sleep:
+  - call pselect() to wait event, at the sametime unblock that signal, if have that signal when sleep:
     + the signal handler called first,
-    + then select() interrupt by that signal, check the global-flag and exit gracefull.
-  - If read event happened, select() wakeup, at the sametime block that signal and process the new arrived data.
+    + then pselect() interrupt by that signal, check the global-flag and exit gracefull.
+  - If read event happened, pselect() wakeup, at the sametime block that signal and process the new arrived data.
 
 This is where the sigprocmask(2) and other "new" functions are useful. Let's see an improved version:
 
