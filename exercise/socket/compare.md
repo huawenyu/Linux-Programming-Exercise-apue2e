@@ -6,12 +6,13 @@ When designing a high performance networking application with non-blocking socke
 
 This article highlights the difference among the polling methods and provides suggestions what to use.
 
- 
+## select
 
-Old, trusted workforce from the times the sockets were still called [Berkeley sockets][1]. It didn't make it into the first specification though since there were no concept of non-blocking I/O at that moment, but it did make it around eighties, and nothing changed since that in its interface.
+### Sample code
+Old, trusted workforce from the times the sockets were still called _Berkeley sockets_. It didn't make it into the first specification though since there were no concept of non-blocking I/O at that moment, but it did make it around eighties, and nothing changed since that in its interface.
 
-To use _select_, the developer needs to initialize and fill up several `fd_set` structures with the descriptors and the events to monitor, and then call **select****()**. A typical workflow looks like that:
-
+To use _select_, the developer needs to initialize and fill up several `fd_set` structures with the descriptors and the events to monitor, and then call _select()_. A typical workflow looks like that:
+```C
     fd_set fd_in, fd_out;
     struct timeval tv;
 
@@ -48,27 +49,46 @@ To use _select_, the developer needs to initialize and fill up several `fd_set` 
         if ( FD_ISSET( sock2, &fd_out ) )
             // output event on sock2
     }
+```
+
+### Cons
 
 When the _select_ interface was designed and developed, nobody probably expected there would be multi-threaded applications serving many thousands connections. Hence _select_ carries quite a few design flaws which make it undesirable as a polling mechanism in the modern networking application. The major disadvantages include:
 
-* _select_ modifies the passed `fd_sets` so none of them can be reused. Even if you don't need to change anything – such as if one of descriptors received data and needs to receive more data – a whole set has to be either recreated again (argh!) or restored from a backup copy via `FD_COPY`. And this has to be done each time the _select_ is called.
-* To find out which descriptors raised the events you have to manually iterate through all the descriptors in the set and call `FD_ISSET` on each one of them. When you have 2,000 of those descriptors and only one of them is active – and, likely, the last one – you're wasting CPU cycles each time you wait.
-* Did I just mention 2,000 descriptors? Well, _select_ cannot support that much. At least on Linux. The maximum number of the supported descriptors is defined by the `FD_SETSIZE` constant, which Linux happily defines as 1024. And while some operating systems allow you to hack this restriction by redefining the `FD_SETSIZE` before including the _sys/select.h_, this is not portable. Indeed, Linux would just ignore this hack and the limit will stay the same.
-* You cannot modify the descriptor set from a different thread while waiting. Suppose a thread is executing the code above. Now suppose you have a housekeeping thread which decided that _sock1_ has been waiting too long for the input data, and it is time to cut the cord. Since this socket could be reused to serve another paying working client, the housekeeping thread wants to close the socket. However the socket is in the `fd_set` which _select_ is waiting for.  
-Now what happens when this socket is closed? **man select** has the answer, and you won't like it. The answer is, "If a file descriptor being monitored by select() is closed in another thread, the result is unspecified".
-* Same problem arises if another thread suddenly decides to send something via _sock1_. It is not possible to start monitoring the socket for the output event until _select_ returns.
-* The choice of the events to wait for is limited; for example, to detect whether the remote socket is closed you have to _a)_ monitor it for input and _b)_ actually attempt to read the data from socket to detect the closure (_read_ will return 0). Which is fine if you want to read from this socket, but what if you're sending a file and do not care about any input right now?
-* _select_ puts extra burden on you when filling up the descriptor list to calculate the largest descriptor number and provide it as a function parameter.
+* modifies the passed `fd_sets`.
+  _select_ modifies the passed `fd_sets` so none of them can be reused. Even if you don't need to change anything – such as if one of descriptors received data and needs to receive more data – a whole set has to be either recreated again (argh!) or restored from a backup copy via `FD_COPY`. And this has to be done each time the _select_ is called.
+* iterate all in the set.
+  To find out which descriptors raised the events you have to manually iterate through all the descriptors in the set and call `FD_ISSET` on each one of them. When you have 2,000 of those descriptors and only one of them is active – and, likely, the last one – you're wasting CPU cycles each time you wait.
+* Maybe only support 1024 descriptors.
+  Did I just mention 2,000 descriptors? Well, _select_ cannot support that much. At least on Linux. The maximum number of the supported descriptors is defined by the `FD_SETSIZE` constant, which Linux happily defines as 1024. And while some operating systems allow you to hack this restriction by redefining the `FD_SETSIZE` before including the _sys/select.h_, this is not portable. Indeed, Linux would just ignore this hack and the limit will stay the same.
+* You cannot modify the descriptor set from a different thread while waiting.
+  Suppose a thread is executing the code above. Now suppose you have a housekeeping thread which decided that _sock1_ has been waiting too long for the input data, and it is time to cut the cord. Since this socket could be reused to serve another paying working client, the housekeeping thread wants to close the socket. However the socket is in the `fd_set` which _select_ is waiting for.  
+    - Now what happens when this socket is closed? **man select** has the answer, and you won't like it. The answer is, "If a file descriptor being monitored by select() is closed in another thread, the result is unspecified".
+    - Same problem arises if another thread suddenly decides to send something via _sock1_. It is not possible to start monitoring the socket for the output event until _select_ returns.
+* The choice of the events to wait for is limited;
+  for example, to detect whether the remote socket is closed you have to:
+    - a) monitor it for input 
+    - b) actually attempt to read the data from socket to detect the closure (_read_ will return 0).
+    - Which is fine if you want to read from this socket, but what if you're sending a file and do not care about any input right now?
+* extra burden
+  _select_ puts extra burden on you when filling up the descriptor list to calculate the largest descriptor number and provide it as a function parameter.
+
+### Pros
 
 Of course the operating system developers recognized those drawbacks and addressed most of them when designing the _poll_ method. Therefore you may ask, is there is any reason to use select at all? Why don't just store it in the shelf of the Computer Science Museum? Then you may be pleased to know that yes, there are two reasons, which may be either very important to you or not important at all.
 
-The first reason is portability. _select_ has been around for ages, and you can be sure that every single platform around which has network support and nonblocking sockets will have a working _select_ implementation while it might not have _poll_ at all. And unfortunately I'm not talking about the tubes and ENIAC here;[ _ poll_ is only available on Windows Vista and above][2] which includes Windows XP – [still used by the whooping 34% of users as of Sep 2013][3] despite the Microsoft pressure. Another option would be to still use _poll_ on those platforms and emulate it with _select_ on those which do not have it; it is up to you whether you consider it reasonable investment.
+* The first reason is portability. _select_ has been around for ages, and you can be sure that every single platform around which has network support and nonblocking sockets will have a working _select_ implementation while it might not have _poll_ at all. And unfortunately I'm not talking about the tubes and ENIAC here;[ _ poll_ is only available on Windows Vista and above][2] which includes Windows XP – [still used by the whooping 34% of users as of Sep 2013][3] despite the Microsoft pressure. Another option would be to still use _poll_ on those platforms and emulate it with _select_ on those which do not have it; it is up to you whether you consider it reasonable investment.
 
-The second reason is more exotic, and is related to the fact that _select_ can – theoretically – handle the timeouts withing the one nanosecond precision, while both _poll_ and _epoll_ can only handle the one millisecond precision. This is not likely to be a concern on a desktop or server system, which clocks doesn't even run with such precision, but it may be necessary on a realtime embedded platform while interacting with some hardware components. Such as lowering control rods to shut down a nuclear reactor – in this case, please, use _select_ to make sure we're all stay safe!
+* The second reason is more exotic, and is related to the fact that _select_ can – theoretically – handle the timeouts withing the one nanosecond precision, while both _poll_ and _epoll_ can only handle the one millisecond precision. This is not likely to be a concern on a desktop or server system, which clocks doesn't even run with such precision, but it may be necessary on a realtime embedded platform while interacting with some hardware components. Such as lowering control rods to shut down a nuclear reactor – in this case, please, use _select_ to make sure we're all stay safe!
 
-The case above would probably be the only case where you would **have to** use _select_ and could not use anything else. However if you are writing an application which would never have to handle more than a handful of sockets (like, 200), the difference between using _poll_ and _select_ would not be based on performance, but more on personal preference or other factors.
+* The case above would probably be the only case where you would **have to** use _select_ and could not use anything else. However if you are writing an application which would never have to handle more than a handful of sockets (like, 200), the difference between using _poll_ and _select_ would not be based on performance, but more on personal preference or other factors.
+
+
+## Poll
 
 _poll_ is a newer polling method which probably was created immediately after someone actually tried to write the high performance networking server. It is much better designed and doesn't suffer from most of the problems which _select_ has. In the vast majority of cases you would be choosing between poll and epoll/libevent.
+
+### Sample code
 
 To use _poll_, the developer needs to initialize the members of `struct pollfd` structure with the descriptors and events to monitor, and call the **poll********()**. A typical workflow looks like that:
 ```C
@@ -103,31 +123,45 @@ To use _poll_, the developer needs to initialize the members of `struct pollfd` 
             // output event on sock2
     }
 ```
-_poll_ was mainly created to fix the pending problems _select _had_, _so it has the following advantages over it:
+
+### Pros
+
+_poll_ was mainly created to fix the pending problems _select_ _had_, so it has the following advantages over it:
 
 * There is no hard limit on the number of descriptors _poll_ can monitor, so the limit of 1024 does not apply here.
 * It does not modify the data passed in the _struct pollfd_ data. Therefore it could be reused between the poll() calls as long as set to zero the _revents_ member for those descriptors which generated the events. The [IEEE specification][4] states that `In each pollfd structure, poll() shall clear the revents member, except that where the application requested a report on a condition by setting one of the bits of events listed above, poll() shall set the corresponding bit in revents if the requested condition is true`. However in my experience at least one platform did not follow this recommendation, and **man 2 poll** on Linux does not make such guarantee either (**man 3p poll** does though).
 * It allows more fine-grained control of events comparing to _select_. For example, it can detect remote peer shutdown without monitoring for read events.
 
 There are a few disadvantages as well, which were mentioned above at the end of the _select_ section. Notably, _poll_ is not present on Microsoft Windows older than Vista; on Vista and above it is called **WSAPoll** although the prototype is the same, and it could be defined as simply as:
-
+```C
     #if defined (WIN32)
     static inline int poll( struct pollfd *pfd, int nfds, int timeout) { return WSAPoll ( pfd, nfds, timeout ); }
     #endif
+```
+
+### Cons
 
 And, as mentioned above, poll timeout has the 1ms precision, which again is very unlikely to be a concern in most scenarios. Nevertheless poll still has a few issues which need to be kept in mind:
 
 * Like _select_, it is still not possible to find out which descriptors have the events triggered without iterating through the whole list and checking the revents. Worse, the same happens in the kernel space as well, as the kernel has to iterate through the list of file descriptors to find out which sockets are monitored, and iterate through the whole list again to set up the events.
 * Like _select_, it is not possible to dynamically modify the set or close the socket which is being polled (see above).
 
-Please keep in mind, however, that those issues might be considered unimportant for most client networking applications – the only exception would be client software such as P2P which may require handling of thousands of open connections. Those issues might not be important even for some server applications. Therefore _poll_ should be your default choice over _select_ unless you have specific reasons mentioned above. More, _poll_ should be your preferred method even over _epoll_ if the following is true:
+Please keep in mind, however, that those issues might be considered unimportant for most client networking applications – the only exception would be client software such as P2P which may require handling of thousands of open connections. Those issues might not be important even for some server applications. Therefore _poll_ should be your default choice over _select_ unless you have specific reasons mentioned above.
+
+### sometimes poll preferred over epoll
+
+More, _poll_ should be your preferred method even over _epoll_ if the following is true:
 
 * You need to support more than just Linux, and do not want to use epoll wrappers such as libevent (epoll is Linux only);
 * Your application needs to monitor less than 1000 sockets at a time (you are not likely to see any benefits from using epoll);
 * Your application needs to monitor more than 1000 sockets at a time, but the connections are very short-lived (this is a close case, but most likely in this scenario you are not likely to see any benefits from using epoll because the speedup in event waiting would be wasted on adding those new descriptors into the set – see below)
 * Your application is not designed the way that it changes the events while another thread is waiting for them (i.e. you're not porting an app using kqueue or IO Completion Ports).
 
+## epoll
+
 epoll is the latest, greatest, newest polling method in Linux (and only Linux). Well, it was actually added to kernel in 2002, so it is not so new. It differs both from _poll_ and _select_ in such a way that it keeps the information about the currently monitored descriptors and associated events inside the kernel, and exports the API to add/remove/modify those.
+
+### Sample code
 
 To use _epoll_, much more preparation is needed. A developer needs to:
 
@@ -158,7 +192,7 @@ A typical workflow looks like that:
 
     // Add the descriptor into the monitoring list. We can do it even if another thread is
     // waiting in epoll_wait - the descriptor will be properly added
-    if ( epoll_ctl( epollfd, EPOLL_CTL_ADD, pConnection1->getSocket(), &ev ) != 0 )
+    if ( epoll_ctl( pollingfd, EPOLL_CTL_ADD, pConnection1->getSocket(), &ev ) != 0 )
         // report error
 
     // Wait for up to 20 events (assuming we have added maybe 200 sockets before that it may happen)
@@ -189,6 +223,8 @@ A typical workflow looks like that:
 
 Just looking at the implementation alone should give you the hint of what are the disadvantages of epoll, which we will mention firs. It is more complex to use, and requires you to write more code, and it requires more library calls comparing to other polling methods.
 
+### Pros
+
 However _epoll_ has some significant advantages over _select/poll_ both in terms of performance and functionality:
 
 * _epoll_ returns only the list of descriptors which triggered the events. No need to iterate through 10,000 descriptors anymore to find that one which triggered the event!
@@ -197,12 +233,16 @@ However _epoll_ has some significant advantages over _select/poll_ both in terms
 * Since the kernel knows all the monitoring descriptors, it can register the events happening on them even when nobody is calling _ epoll_wait_. This allows implementing interesting features such as edge triggering, which will be described in a separate article.
 * It is possible to have the multiple threads waiting on the same epoll queue with _epoll_wait_(), something you cannot do with _select/poll_. In fact it is not only possible with epoll, but the recommended method in the edge triggering mode.
 
+### Cons
+
 However you need to keep in mind that **_epoll_ is not a "better poll"**, and it also has disadvantages when comparing to _poll_:
 
 * Changing the event flags (i.e. from READ to WRITE) requires the _epoll_ctl_ syscall, while when using _poll_ this is a simple bitmask operation done entirely in userspace. Switching 5,000 sockets from reading to writing with _epoll_ would require 5,000 syscalls and hence context switches (as of 2014 calls to _epoll_ctl_ still  could not be batched, and each descriptor must be changed separately), while in poll it would require a single loop over the _pollfd_ structure.
 * Each _accept_()_ed_ socket needs to be added to the set, and same as above, with epoll it has to be done by calling _epoll_ctl_ – which means there are two required syscalls per new connection socket instead of one for poll. If your server has many short-lived connections which send or receive little traffic, _epoll_ will likely take longer than _poll_ to serve them.
 * _epoll_ is exclusively Linux domain, and while other platforms have similar mechanisms, they are not exactly the same – edge triggering, for example, is pretty unique (FreeBSD's kqueue supports it too though).
 * High performance processing logic is more complex and hence more difficult to debug, especially for edge triggering which is prone to deadlocks if you miss extra read/write.
+
+### sometimes epoll is the only choice
 
 Therefore you should only use epoll if all following is true:
 
@@ -213,7 +253,9 @@ Therefore you should only use epoll if all following is true:
 
 If all the items above aren't true, you should be better served by using _poll_ instead.
 
-[libebent][5] is a library which wraps the polling methods listed in this article (and some others) in an uniform API.Its main advantage is that it allows you to write the code once and compile and run it on many operating systems without the need to change the code. It is important to understand that libevent it is just a wrapper built on top of the existing polling methods, and therefore it inherits the issues those polling methods have. It will not make _select_ supporting more than 1024 sockets on Linux or allow _epoll_ to modify the polling events without a syscall/context switch. Therefore it is still important to understand each method's pros and cons.
+## libevent
+
+[libevent][5] is a library which wraps the polling methods listed in this article (and some others) in an uniform API.Its main advantage is that it allows you to write the code once and compile and run it on many operating systems without the need to change the code. It is important to understand that libevent it is just a wrapper built on top of the existing polling methods, and therefore it inherits the issues those polling methods have. It will not make _select_ supporting more than 1024 sockets on Linux or allow _epoll_ to modify the polling events without a syscall/context switch. Therefore it is still important to understand each method's pros and cons.
 
 Having to provide access to the functionality from the dramatically different methods, libevent has a rather complex API which is much more difficult to use than _poll_ or even _epoll_. It is however easier to use libevent than to write two separate backends if you need to support FreeBSD (epoll and kqueue). Hence it is a viable alternative which should be considered if:
 
