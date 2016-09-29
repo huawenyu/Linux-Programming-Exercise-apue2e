@@ -1,9 +1,18 @@
 [Original Copy](http://www.linuxprogrammingblog.com/all-about-linux-signals)
 
-# Select
+# Content
 
-[Basic sample](select.c), [server-wait-all-client](select-mult-cli.c).  
-But we should know that select have [race](select_issue.c) issue which can be solved by [pselect](pselect.c).
+There have compare [select/poll/epoll](compare.md)
+
+## sample
+  - [Basic Select](select.c),
+  - [Select used in server wait-all-client](select-mult-cli.c)
+
+But we should know that select:
+  - have [select signal race condition](select_issue.c) issue
+  - which can be solved by [pselect](pselect.c).
+
+# Select
 
 ## Race conditions with select
 
