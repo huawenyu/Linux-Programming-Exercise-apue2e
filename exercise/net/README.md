@@ -1,4 +1,4 @@
-[Copy Original](http://www.linuxprogrammingblog.com/all-about-linux-signals)
+[Original Copy](http://www.linuxprogrammingblog.com/all-about-linux-signals)
 
 # Select
 
