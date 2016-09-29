@@ -55,22 +55,22 @@ To use _select_, the developer needs to initialize and fill up several `fd_set` 
 
 When the _select_ interface was designed and developed, nobody probably expected there would be multi-threaded applications serving many thousands connections. Hence _select_ carries quite a few design flaws which make it undesirable as a polling mechanism in the modern networking application. The major disadvantages include:
 
-* modifies the passed `fd_sets`.
+* modifies the passed `fd_sets`.  
   _select_ modifies the passed `fd_sets` so none of them can be reused. Even if you don't need to change anything – such as if one of descriptors received data and needs to receive more data – a whole set has to be either recreated again (argh!) or restored from a backup copy via `FD_COPY`. And this has to be done each time the _select_ is called.
-* iterate all in the set.
+* iterate all in the set.  
   To find out which descriptors raised the events you have to manually iterate through all the descriptors in the set and call `FD_ISSET` on each one of them. When you have 2,000 of those descriptors and only one of them is active – and, likely, the last one – you're wasting CPU cycles each time you wait.
-* Maybe only support 1024 descriptors.
+* Maybe only support 1024 descriptors.  
   Did I just mention 2,000 descriptors? Well, _select_ cannot support that much. At least on Linux. The maximum number of the supported descriptors is defined by the `FD_SETSIZE` constant, which Linux happily defines as 1024. And while some operating systems allow you to hack this restriction by redefining the `FD_SETSIZE` before including the _sys/select.h_, this is not portable. Indeed, Linux would just ignore this hack and the limit will stay the same.
-* You cannot modify the descriptor set from a different thread while waiting.
+* You cannot modify the descriptor set from a different thread while waiting.  
   Suppose a thread is executing the code above. Now suppose you have a housekeeping thread which decided that _sock1_ has been waiting too long for the input data, and it is time to cut the cord. Since this socket could be reused to serve another paying working client, the housekeeping thread wants to close the socket. However the socket is in the `fd_set` which _select_ is waiting for.  
     - Now what happens when this socket is closed? **man select** has the answer, and you won't like it. The answer is, "If a file descriptor being monitored by select() is closed in another thread, the result is unspecified".
     - Same problem arises if another thread suddenly decides to send something via _sock1_. It is not possible to start monitoring the socket for the output event until _select_ returns.
-* The choice of the events to wait for is limited;
+* The choice of the events to wait for is limited;  
   for example, to detect whether the remote socket is closed you have to:
     - a) monitor it for input 
     - b) actually attempt to read the data from socket to detect the closure (_read_ will return 0).
     - Which is fine if you want to read from this socket, but what if you're sending a file and do not care about any input right now?
-* extra burden
+* extra burden  
   _select_ puts extra burden on you when filling up the descriptor list to calculate the largest descriptor number and provide it as a function parameter.
 
 ### Pros
