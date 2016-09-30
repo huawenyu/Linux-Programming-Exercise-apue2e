@@ -1,10 +1,15 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <netinet/in.h>
 #include <errno.h>
+#include <unistd.h>
+#include <sys/select.h> /* According to POSIX.1-2001 */
+#include <fcntl.h>
 
 #define SERVER_PORT  12345
 
@@ -16,8 +21,12 @@ int main (int argc, char *argv[])
 	int close_conn;
 	char buffer[80];
 	struct sockaddr_in addr;
+	struct sockaddr_in cli_addr;
+	int cli_addr_len;
 	struct timeval timeout;
-	struct fd_set master_set, working_set;
+	fd_set master_set, working_set;
+
+	cli_addr_len = sizeof(cli_addr);
 
 	listen_sd = socket(AF_INET, SOCK_STREAM, 0);
 	if (listen_sd < 0) {
@@ -36,8 +45,10 @@ int main (int argc, char *argv[])
 
 	/* Set socket to be nonblocking.
 	   All of the sockets for the incoming connections will also be nonblocking
-	   since they will inherit that state from the listening socket. */
-	rc = ioctl(listen_sd, FIONBIO, (char *)&on);
+	   since they will inherit that state from the listening socket.
+	   Maybe we don't need flag FASYNC, FD_CLOEXEC */
+	rc = fcntl(listen_sd, F_SETFL,
+		   fcntl(listen_sd, F_GETFL, 0) | O_NONBLOCK|FASYNC);
 	if (rc < 0) {
 		perror("ioctl() failed");
 		close(listen_sd);
@@ -80,6 +91,11 @@ int main (int argc, char *argv[])
 		printf("Waiting on select()...\n");
 		rc = select(max_sd + 1, &working_set, NULL, NULL, &timeout);
 		if (rc < 0) {
+#ifdef __linux__
+			/* select again */
+			if (errno == EINTR)
+				continue;
+#endif
 			perror("  select() failed");
 			break;
 		}
@@ -103,11 +119,27 @@ int main (int argc, char *argv[])
 				do {
 					/* Accept each incoming connection:
 					   - Accept fails with EWOULDBLOCK means have accepted all of them
-					   - Any other failure on accept will cause us to end the server. */
-					new_sd = accept(listen_sd, NULL, NULL);
+					   - Any other failure on accept will cause us to end the server.
+
+					   struct sockaddr is a generic socket address:
+					   - struct sockaddr_in is the actual IPv4 address layout (it has .sin_port and .sin_addr)
+					   - A UNIX domain socket will have type struct sockaddr_un */
+					new_sd = accept(listen_sd,
+							(struct sockaddr *)&cli_addr,
+							(socklen_t *)&cli_addr_len);
 					if (new_sd < 0) {
+						/* The socket is marked nonblocking
+						 * and no connections are present to be accepted. */
 						if (errno == EWOULDBLOCK)
 							break;
+#ifdef __linux__
+						/* same-as EWOULDBLOCK: incomming connection all done! */
+						else if (errno == EAGAIN)
+							break;
+						/* accept again */
+						else if (errno == EINTR)
+							continue;
+#endif
 						perror("  accept() failed");
 						end_server = 1;
 					}
@@ -130,12 +162,27 @@ int main (int argc, char *argv[])
 					   - If any other failure occurs, we will close the connection. */
 					rc = recv(i, buffer, sizeof(buffer), 0);
 					if (rc < 0) {
+						/* man recv(2):
+						   The socket is marked nonblocking
+						   and the receive operation would block.
+						   data all done!. */
 						if (errno == EWOULDBLOCK)
 							break;
+#ifdef __linux__
+						/* same-as EWOULDBLOCK: all done! */
+						else if (errno == EAGAIN)
+							break;
+						/* read again */
+						else if (errno == EINTR)
+							continue;
+						/* remote endpoint receive our send-data after FIN */
+						else if (errno == ECONNRESET)
+							continue;
+#endif
 						perror("  recv() failed");
 						close_conn = 1;
 					}
-					/* connection closed by the remote client */
+					/* connection closed by the remote endpoint */
 					else if (rc == 0) {
 						printf("  Connection closed\n");
 						close_conn = 1;
@@ -146,8 +193,25 @@ int main (int argc, char *argv[])
 					len = rc;
 					printf("  %d bytes received\n", len);
 					/* Echo the data back to the client */
+#ifdef __linux__
+resend_again:
+#endif
 					rc = send(i, buffer, len, 0);
 					if (rc < 0) {
+						/* all done! */
+						if (errno == EWOULDBLOCK)
+							continue;
+#ifdef __linux__
+						/* same-as EWOULDBLOCK: all done! */
+						else if (errno == EAGAIN)
+							continue;
+						/* read again */
+						else if (errno == EINTR)
+							goto resend_again;
+						/* Connection reset by peer. */
+						else if (errno == ECONNRESET)
+							; /* closed */
+#endif
 						perror("  send() failed");
 						close_conn = 1;
 						break;
