@@ -164,10 +164,10 @@ int main (int argc, char *argv[])
 			}
 		}
 
-		if (!compress_array)
-			continue;
 		/* Squeeze array and decrement the number of file descriptors,
 		   the events field is same and revents is output.          */
+		if (!compress_array)
+			continue;
 		compress_array = 0;
 		for (i = 0; i < nfds; i++) {
 			if (fds[i].fd != -1)

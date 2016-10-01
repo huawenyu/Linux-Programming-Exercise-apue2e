@@ -11,18 +11,18 @@
 
 #define MAXEVENTS 64
 
-static int make_socket_non_blocking (int sfd)
+static int make_socket_non_blocking (int listen_sd)
 {
 	int flags, s;
 
-	flags = fcntl (sfd, F_GETFL, 0);
+	flags = fcntl (listen_sd, F_GETFL, 0);
 	if (flags == -1) {
 		perror ("fcntl");
 		return -1;
 	}
 
 	flags |= O_NONBLOCK;
-	s = fcntl (sfd, F_SETFL, flags);
+	s = fcntl (listen_sd, F_SETFL, flags);
 	if (s == -1) {
 		perror ("fcntl");
 		return -1;
@@ -35,7 +35,7 @@ static int create_and_bind (char *port)
 {
 	struct addrinfo hints;
 	struct addrinfo *result, *rp;
-	int s, sfd;
+	int s, listen_sd;
 
 	memset (&hints, 0, sizeof (struct addrinfo));
 	hints.ai_family = AF_UNSPEC;     /* Return IPv4 and IPv6 choices */
@@ -48,56 +48,97 @@ static int create_and_bind (char *port)
 		return -1;
 	}
 	for (rp = result; rp != NULL; rp = rp->ai_next) {
-		sfd = socket (rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-		if (sfd == -1)
+		listen_sd = socket (rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+		if (listen_sd == -1)
 			continue;
-		s = bind (sfd, rp->ai_addr, rp->ai_addrlen);
+		s = bind (listen_sd, rp->ai_addr, rp->ai_addrlen);
 		if (s == 0) {
 			/* We managed to bind successfully! */
 			break;
 		}
-		close (sfd);
+		close (listen_sd);
 	}
 	if (rp == NULL) {
 		fprintf (stderr, "Could not bind\n");
 		return -1;
 	}
 	freeaddrinfo (result);
-	return sfd;
+	return listen_sd;
+
+
+	int listen_sd;
+
+	listen_sd = socket(AF_INET, SOCK_STREAM, 0);
+	if (listen_sd < 0) {
+		perror("socket() failed");
+		exit(-1);
+	}
 }
 
 int main (int argc, char *argv[])
 {
-	int sfd, s;
+	int listen_sd, s;
 	int efd;
 	struct epoll_event event;
 	struct epoll_event *events;
 
-	if (argc != 2) {
-		fprintf (stderr, "Usage: %s [port]\n", argv[0]);
-		exit (EXIT_FAILURE);
+	listen_sd = socket(AF_INET, SOCK_STREAM, 0);
+	if (listen_sd < 0) {
+		perror("socket() failed");
+		exit(-1);
 	}
 
-	sfd = create_and_bind (argv[1]);
-	if (sfd == -1)
-		abort ();
-	s = make_socket_non_blocking (sfd);
-	if (s == -1)
-		abort ();
-	s = listen (sfd, SOMAXCONN);
-	if (s == -1) {
-		perror ("listen");
-		abort ();
+	/* Allow socket descriptor to be reuseable */
+	rc = setsockopt(listen_sd, SOL_SOCKET, SO_REUSEADDR,
+			(char *)&on, sizeof(on));
+	if (rc < 0) {
+		perror("setsockopt() failed");
+		close(listen_sd);
+		exit(-1);
 	}
-	efd = epoll_create1 (0);
+
+	/* Set socket to be nonblocking.
+	   All of the sockets for the incoming connections will also be nonblocking
+	   since they will inherit that state from the listening socket.
+	   Maybe we don't need flag FASYNC, FD_CLOEXEC */
+	rc = fcntl(listen_sd, F_SETFL,
+		   fcntl(listen_sd, F_GETFL, 0) | O_NONBLOCK|FASYNC);
+	if (rc < 0) {
+		perror("ioctl() failed");
+		close(listen_sd);
+		exit(-1);
+	}
+
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(SERVER_PORT);
+	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	rc = bind(listen_sd, (struct sockaddr *)&addr, sizeof(addr));
+	if (rc < 0) {
+		perror("bind() failed");
+		close(listen_sd);
+		exit(-1);
+	}
+
+	rc = listen(listen_sd, SOMAXCONN);
+	if (rc < 0) {
+		perror("listen() failed");
+		close(listen_sd);
+		exit(-1);
+	}
+
+	/* Nowadays, this hint is no longer required, so here use epoll_create1(flags).
+	   But epoll_create(size > 0) in order to ensure backward compatibility when
+	   new epoll applications are run on older kernels. */
+	efd = epoll_create1(0);
 	if (efd == -1) {
-		perror ("epoll_create");
-		abort ();
+		perror("epoll_create");
+		abort();
 	}
 
-	event.data.fd = sfd;
+	event.data.fd = listen_sd;
 	event.events = EPOLLIN | EPOLLET;
-	s = epoll_ctl (efd, EPOLL_CTL_ADD, sfd, &event);
+	s = epoll_ctl (efd, EPOLL_CTL_ADD, listen_sd, &event);
 	if (s == -1) {
 		perror ("epoll_ctl");
 		abort ();
@@ -121,7 +162,7 @@ int main (int argc, char *argv[])
 				close (events[i].data.fd);
 				continue;
 			}
-			else if (sfd == events[i].data.fd) {
+			else if (listen_sd == events[i].data.fd) {
 				/* We have a notification on the listening socket, which
 				   means one or more incoming connections. */
 				for (;;) {
@@ -131,7 +172,7 @@ int main (int argc, char *argv[])
 					char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
 
 					in_len = sizeof in_addr;
-					infd = accept (sfd, &in_addr, &in_len);
+					infd = accept (listen_sd, &in_addr, &in_len);
 					if (infd == -1) {
 						if ((errno == EAGAIN) ||
 						    (errno == EWOULDBLOCK)) {
@@ -218,6 +259,6 @@ int main (int argc, char *argv[])
 		}
 	}
 	free (events);
-	close (sfd);
+	close (listen_sd);
 	return EXIT_SUCCESS;
 }

@@ -50,3 +50,9 @@ int main()
 }
 ```
 
+## How to create child process with following character
+
+Please add child process protection. To be more specific: 
+  - 1, Make sure child process can be killed by parent process if it's hanging.
+  - 2, Parent process knows when child process exits.
+  - 3, There won't be more than 1 child process running the same time.

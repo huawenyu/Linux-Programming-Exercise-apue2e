@@ -4,11 +4,11 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/select.h> /* According to POSIX.1-2001 */
 #include <sys/time.h>
 #include <netinet/in.h>
 #include <errno.h>
 #include <unistd.h>
-#include <sys/select.h> /* According to POSIX.1-2001 */
 #include <fcntl.h>
 
 #define SERVER_PORT  12345
@@ -35,7 +35,7 @@ int main (int argc, char *argv[])
 	}
 
 	/* Allow socket descriptor to be reuseable */
-	rc = setsockopt(listen_sd, SOL_SOCKET,  SO_REUSEADDR,
+	rc = setsockopt(listen_sd, SOL_SOCKET, SO_REUSEADDR,
 			(char *)&on, sizeof(on));
 	if (rc < 0) {
 		perror("setsockopt() failed");
@@ -218,11 +218,11 @@ resend_again:
 					}
 				}
 
-				if (!close_conn)
-					continue;
 				/* clean up this active connection when close_conn flag set:
 				   - removing the descriptor from the master set
 				   - determining the new maximum descriptor */
+				if (!close_conn)
+					continue;
 				close(i);
 				FD_CLR(i, &master_set);
 				if (i == max_sd) {

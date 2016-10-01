@@ -1,3 +1,15 @@
+# Doc
+
+http://blog.csdn.net/liuxuejiang158blog/article/details/12422471
+http://blog.csdn.net/liuxuejiang158blog/article/details/12290725
+http://www.serverphorums.com/read.php?12,628000
+http://stackoverflow.com/questions/12344755/epolloneshot-returns-multiple-event
+http://stackoverflow.com/questions/2673890/epoll-in-epollet-mode-returning-2-epollin-before-reading-from-the-socket
+
+http://www.alexonlinux.com/signal-handling-in-linux
+http://www.ibm.com/support/knowledgecenter/en/ssw_i5_54/rzab6/example.htm
+http://stackoverflow.com/questions/9774986/linux-select-vs-ppoll-vs-pselect
+
 # How to use epoll
 
 [A complete example in C][6]
