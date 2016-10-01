@@ -7,11 +7,19 @@
 #include <sys/select.h> /* According to POSIX.1-2001 */
 #include <sys/time.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #define SERVER_PORT  12345
+
+static volatile sig_atomic_t l_read_data = 1;
+static void sig_hdl (int sig)
+{
+	l_read_data = !l_read_data;
+}
 
 int main (int argc, char *argv[])
 {
@@ -25,8 +33,14 @@ int main (int argc, char *argv[])
 	int cli_addr_len;
 	struct timeval timeout;
 	fd_set master_set, working_set;
+	struct sigaction sig_act;
 
 	cli_addr_len = sizeof(cli_addr);
+	sig_act.sa_handler = &sig_hdl;
+	if (sigaction(SIGUSR1, &sig_act, NULL) < 0) {
+		perror ("sigaction");
+		exit(-1);
+	}
 
 	listen_sd = socket(AF_INET, SOCK_STREAM, 0);
 	if (listen_sd < 0) {
@@ -44,11 +58,9 @@ int main (int argc, char *argv[])
 	}
 
 	/* Set socket to be nonblocking.
-	   All of the sockets for the incoming connections will also be nonblocking
-	   since they will inherit that state from the listening socket.
 	   Maybe we don't need flag FASYNC, FD_CLOEXEC */
 	rc = fcntl(listen_sd, F_SETFL,
-		   fcntl(listen_sd, F_GETFL, 0) | O_NONBLOCK|FASYNC);
+		   fcntl(listen_sd, F_GETFL, 0) | O_NONBLOCK | FASYNC);
 	if (rc < 0) {
 		perror("ioctl() failed");
 		close(listen_sd);
@@ -81,6 +93,7 @@ int main (int argc, char *argv[])
 	timeout.tv_sec  = 3 * 60;
 	timeout.tv_usec = 0;
 
+	printf("Start %d ...\n", getpid());
 	/* - Loop waiting for incoming connects
 	   - or for incoming data on any of the connected sockets. */
 	while (!end_server) {
@@ -145,7 +158,21 @@ int main (int argc, char *argv[])
 					}
 					else {
 						/* Add to the master read set */
-						printf("  New incoming connection - %d\n", new_sd);
+						printf("  New incoming connection-%d %s:%d\n", new_sd,
+							   inet_ntoa(cli_addr.sin_addr),
+							   ntohs(cli_addr.sin_port));
+#ifdef __linux__
+						/* Linux have no inherit from listen_sd, so set nonblocking one-by-one.
+						   (Other Unix-like OS: All of the sockets for the incoming connections will also be nonblocking
+						   since they will inherit that state from the listening socket.) */
+						rc = fcntl(new_sd, F_SETFL,
+								   fcntl(new_sd, F_GETFL, 0) | O_NONBLOCK | FASYNC);
+						if (rc < 0) {
+							perror("ioctl() failed");
+							close(new_sd);
+							exit(-1);
+						}
+#endif
 						FD_SET(new_sd, &master_set);
 						if (new_sd > max_sd)
 							max_sd = new_sd;
@@ -156,6 +183,8 @@ int main (int argc, char *argv[])
 			else {
 				printf("  Descriptor %d is readable\n", i);
 				close_conn = 0;
+				if (!l_read_data)
+					continue;
 				/* Receive all incoming data on this socket */
 				for (;;) {
 					/* - the recv fails with EWOULDBLOCK means data over
@@ -166,18 +195,26 @@ int main (int argc, char *argv[])
 						   The socket is marked nonblocking
 						   and the receive operation would block.
 						   data all done!. */
-						if (errno == EWOULDBLOCK)
+						if (errno == EWOULDBLOCK) {
+							printf("  recv EWOULDBLOCK\n");
 							break;
+						}
 #ifdef __linux__
 						/* same-as EWOULDBLOCK: all done! */
-						else if (errno == EAGAIN)
+						else if (errno == EAGAIN) {
+							printf("  recv EAGAIN\n");
 							break;
+						}
 						/* read again */
-						else if (errno == EINTR)
+						else if (errno == EINTR) {
+							printf("  recv EINTR\n");
 							continue;
+						}
 						/* remote endpoint receive our send-data after FIN */
-						else if (errno == ECONNRESET)
+						else if (errno == ECONNRESET) {
+							printf("  recv ECONNRESET\n");
 							continue;
+						}
 #endif
 						perror("  recv() failed");
 						close_conn = 1;
@@ -191,7 +228,7 @@ int main (int argc, char *argv[])
 
 					/* process the received (partial) data */
 					len = rc;
-					printf("  %d bytes received\n", len);
+					printf("  recv %d: %.*s\n", len, len, buffer);
 					/* Echo the data back to the client */
 #ifdef __linux__
 resend_again:

@@ -17,7 +17,7 @@
 #include <errno.h>
 
 /* Flag that tells the daemon to exit. */
-static volatile int exit_request = 0;
+static volatile sig_atomic_t exit_request = 0;
 
 /* Signal handler. */
 static void hdl (int sig)
