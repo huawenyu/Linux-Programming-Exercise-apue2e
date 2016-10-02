@@ -15,10 +15,22 @@
 
 #define SERVER_PORT  12345
 
-static volatile sig_atomic_t l_read_data = 1;
+enum {
+	config_flag_no_read = 0,
+};
+static volatile sig_atomic_t l_config_flags = 0;
 static void sig_hdl (int sig)
 {
-	l_read_data = !l_read_data;
+	if (l_config_flags & (1<<config_flag_no_read))
+		l_config_flags &= ~(1<<config_flag_no_read);
+	else
+		l_config_flags |= 1<<config_flag_no_read;
+}
+
+static void config_flags_print(char *buff, size_t buff_len)
+{
+	snprintf(buff, buff_len, "flags: no-read=%d",
+		 l_config_flags & (1<<config_flag_no_read) ? 1 : 0);
 }
 
 int main (int argc, char *argv[])
@@ -93,7 +105,6 @@ int main (int argc, char *argv[])
 	timeout.tv_sec  = 3 * 60;
 	timeout.tv_usec = 0;
 
-	printf("Start %d ...\n", getpid());
 	/* - Loop waiting for incoming connects
 	   - or for incoming data on any of the connected sockets. */
 	while (!end_server) {
@@ -101,13 +112,15 @@ int main (int argc, char *argv[])
 		memcpy(&working_set, &master_set, sizeof(master_set));
 
 		/* Call select() and wait 3 minutes for it to complete.   */
-		printf("Waiting on select()...\n");
+		printf("Waiting %d on %d select()...\n", getpid(), SERVER_PORT);
 		rc = select(max_sd + 1, &working_set, NULL, NULL, &timeout);
 		if (rc < 0) {
 #ifdef __linux__
 			/* select again */
-			if (errno == EINTR)
+			if (errno == EINTR) {
+				printf("  select() EINTR");
 				continue;
+			}
 #endif
 			perror("  select() failed");
 			break;
@@ -130,6 +143,9 @@ int main (int argc, char *argv[])
 				printf("  Listening socket is readable\n");
 				/* Accept all incoming connections queued up on the listening socket */
 				do {
+					socklen_t loc_len;
+					struct sockaddr_in loc_addr;
+
 					/* Accept each incoming connection:
 					   - Accept fails with EWOULDBLOCK means have accepted all of them
 					   - Any other failure on accept will cause us to end the server.
@@ -150,40 +166,45 @@ int main (int argc, char *argv[])
 						else if (errno == EAGAIN)
 							break;
 						/* accept again */
-						else if (errno == EINTR)
+						else if (errno == EINTR) {
+							printf("  accept() EINTR");
 							continue;
+						}
 #endif
 						perror("  accept() failed");
 						end_server = 1;
 					}
-					else {
-						/* Add to the master read set */
-						printf("  New incoming connection-%d %s:%d\n", new_sd,
-							   inet_ntoa(cli_addr.sin_addr),
-							   ntohs(cli_addr.sin_port));
+
+					/* Add to the master read set */
+					getsockname(new_sd, (struct sockaddr *)&loc_addr, &loc_len);
+					printf("  New incoming connection-%d %s:%d -> %s:%d\n", new_sd,
+						   inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port),
+						   inet_ntoa(loc_addr.sin_addr), ntohs(loc_addr.sin_port)
+						   );
 #ifdef __linux__
-						/* Linux have no inherit from listen_sd, so set nonblocking one-by-one.
-						   (Other Unix-like OS: All of the sockets for the incoming connections will also be nonblocking
-						   since they will inherit that state from the listening socket.) */
-						rc = fcntl(new_sd, F_SETFL,
-								   fcntl(new_sd, F_GETFL, 0) | O_NONBLOCK | FASYNC);
-						if (rc < 0) {
-							perror("ioctl() failed");
-							close(new_sd);
-							exit(-1);
-						}
-#endif
-						FD_SET(new_sd, &master_set);
-						if (new_sd > max_sd)
-							max_sd = new_sd;
+					/* Linux have no inherit from listen_sd, so set nonblocking one-by-one.
+					   (Other Unix-like OS: All of the sockets for the incoming connections will also be nonblocking
+					   since they will inherit that state from the listening socket.) */
+					rc = fcntl(new_sd, F_SETFL,
+							   fcntl(new_sd, F_GETFL, 0) | O_NONBLOCK | FASYNC);
+					if (rc < 0) {
+						perror("fcntl() failed");
+						close(new_sd);
+						exit(-1);
 					}
+#endif
+					FD_SET(new_sd, &master_set);
+					if (new_sd > max_sd)
+						max_sd = new_sd;
 				} while (new_sd != -1);
 			}
 			/* have readable client socket*/
 			else {
-				printf("  Descriptor %d is readable\n", i);
+				config_flags_print(buffer, sizeof(buffer));
+				printf("  Descriptor %d is readable with %s\n",
+				       i, buffer);
 				close_conn = 0;
-				if (!l_read_data)
+				if (l_config_flags & (1<<config_flag_no_read))
 					continue;
 				/* Receive all incoming data on this socket */
 				for (;;) {
@@ -242,7 +263,6 @@ resend_again:
 						/* same-as EWOULDBLOCK: all done! */
 						else if (errno == EAGAIN)
 							continue;
-						/* read again */
 						else if (errno == EINTR)
 							goto resend_again;
 						/* Connection reset by peer. */
