@@ -47,7 +47,6 @@ int main (int argc, char *argv[])
 	fd_set master_set, working_set;
 	struct sigaction sig_act;
 
-	cli_addr_len = sizeof(cli_addr);
 	sig_act.sa_handler = &sig_hdl;
 	if (sigaction(SIGUSR1, &sig_act, NULL) < 0) {
 		perror ("sigaction");
@@ -146,6 +145,10 @@ int main (int argc, char *argv[])
 					socklen_t loc_len;
 					struct sockaddr_in loc_addr;
 
+					/* as input/output parameter,
+					   addr_len should be calculate every times. */
+					cli_addr_len = sizeof(cli_addr);
+
 					/* Accept each incoming connection:
 					   - Accept fails with EWOULDBLOCK means have accepted all of them
 					   - Any other failure on accept will cause us to end the server.
@@ -209,8 +212,10 @@ int main (int argc, char *argv[])
 				/* Receive all incoming data on this socket */
 				for (;;) {
 					/* - the recv fails with EWOULDBLOCK means data over
-					   - If any other failure occurs, we will close the connection. */
-					rc = recv(i, buffer, sizeof(buffer), 0);
+					   - If any other failure occurs, we will close the connection.
+					   - recvfrom sameas recv
+					     rc = recv(i, buffer, sizeof(buffer), 0); */
+					rc = recvfrom(i, buffer, sizeof(buffer), 0, 0, 0);
 					if (rc < 0) {
 						/* man recv(2):
 						   The socket is marked nonblocking
@@ -296,4 +301,5 @@ resend_again:
 			continue;
 		close(i);
 	}
+	return 0;
 }

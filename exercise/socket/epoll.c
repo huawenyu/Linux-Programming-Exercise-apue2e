@@ -141,8 +141,13 @@ int main (int argc, char *argv[])
 					int new_sd;
 					/* char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV]; */
 
+					/* as input/output parameter,
+					   addr_len should be calculate every times. */
 					in_len = sizeof in_addr;
-					new_sd = accept(listen_sd, (struct sockaddr *)&in_addr, &in_len);
+
+					new_sd = accept(listen_sd,
+							(struct sockaddr *)&in_addr,
+							&in_len);
 					if (new_sd == -1) {
 						if ((errno == EAGAIN)
 							|| (errno == EWOULDBLOCK)) {
@@ -207,6 +212,8 @@ int main (int argc, char *argv[])
 					ssize_t count;
 					char buf[512];
 
+					/* - recvfrom sameas recv
+					     rc = recv(i, buffer, sizeof(buffer), 0); */
 					count = recv(events[i].data.fd, buf, sizeof buf, 0);
 					if (count == -1) {
 						/* If errno == EAGAIN, that means we have read all
