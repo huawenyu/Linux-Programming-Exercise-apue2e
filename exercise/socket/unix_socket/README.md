@@ -1,7 +1,10 @@
 # UNIX domain sockets
 
-* A [server](srv.c) example
-* A [client](cli.c) example
+## Samples
+
+* Abstract Name as address [client](cli.c), [server](srv.c)
+* Stream Sample with send file descriptor, [client](stream_cli.c), [server](stream_srv.c)
+* BiDirectional DataGram Sample [client](dgram_cli.c), [server](dgram_srv.c)
 
 ## Why use unix domain socket for an IPC mechanism instead of pipes, signals, or shared memory?
 
@@ -22,13 +25,12 @@
     on the host can open the file, and thus communicate with the server.  Therefore,
     UNIX domain sockets provide an advantage over Internet sockets (to which anyone
     can connect, unless extra authentication logic is implemented).
-
   - Because everything that is going on takes place on the same computer controlled by a single kernel, the kernel knows everything about the socket and the parties on both sides. This means that server programs that need authentication can find out what user is connecting to them without having to obtain a user name and password.
 * Linux Abstract Socket Namespace, the pathname for a UNIX domain socket begins with a null byte '\0', its name is not mapped into the filesystem. Thus it won't collide with other names in the filesystem.
 * Open file descriptors from one process can be sent to another totally unrelated process
 * Parties can know what PID is on the other side of a Unix domain Socket
 
-### Abstract names for unix domain sockets:  
+### Abstract names for unix domain sockets:
 * Another Linux specific feature is abstract names for unix domain sockets.
 * The trick is to make the first byte of the address name null.
 * If sun_path[0] is \0, The kernel uses the entirety of the remainder of sun_path as the name of the socket,  
@@ -48,20 +50,4 @@
 * Distinct clients,
   - Clients using sockets each have an independent connection to the server.
   - With named pipes, many clients may write to the pipe, but the server cannot distinguish the clients from each other
-
-## Address
-
-A UNIX domain socket is known by a pathname.
-```C
-  struct sockaddr_un addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-  strncpy(addr.sun_path, "socket", sizeof(addr.sun_path)-1);
-  bind(fd, (struct sockaddr*)&addr, sizeof(addr));
-```
-
-The resulting pathname is visible in the filesystem, like: 
-
-  % ls -l
-  srwxr-xr-x 1 <owner> <group>    0 2011-07-02 17:11 socket
 
