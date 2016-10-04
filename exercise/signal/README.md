@@ -26,6 +26,50 @@
 ## Clarification on SIGKILL, SIGTERM, SIGINT, SIGQUIT and SIGSTP
 
 A few days ago, i landed upon unix signals that lead to process termination. I guess i was trying to remember the signals generated in linux when one presses Ctrl+Z and Ctrl+C. Memory did not serve me at that moment and i decided to look these up, one more time. I realized that having a consolidated book which explains these terms clearly is better than searching loads of webpages. I did the later since i had kept my unix os book away from my reach.To my disappointment, there was no single link that listed out all differences in an orderly fashion.
+```
+       First the signals described in the original POSIX.1-1990 standard.
+
+       Signal     Value     Action   Comment
+       ──────────────────────────────────────────────────────────────────────
+*      SIGHUP        1       Term    Hangup detected on controlling terminal
+                                     or death of controlling process
+*      SIGINT        2       Term    Interrupt from keyboard, Ctrl+C
+*      SIGQUIT       3       Core    Quit from keyboard, Ctrl+\
+       SIGILL        4       Core    Illegal Instruction
+*      SIGABRT       6       Core    Abort signal from abort(3)
+       SIGFPE        8       Core    Floating point exception
+*#     SIGKILL       9       Term    Kill signal
+*      SIGSEGV      11       Core    Invalid memory reference
+       SIGPIPE      13       Term    Broken pipe: write to pipe with no
+                                     readers
+*      SIGALRM      14       Term    Timer signal from alarm(2)
+*      SIGTERM      15       Term    Termination signal
+*      SIGUSR1   30,10,16    Term    User-defined signal 1
+*      SIGUSR2   31,12,17    Term    User-defined signal 2
+       SIGCHLD   20,17,18    Ign     Child stopped or terminated
+       SIGCONT   19,18,25    Cont    Continue if stopped
+*#     SIGSTOP   17,19,23    Stop    Stop process, Ctrl+Z
+       SIGTSTP   18,20,24    Stop    Stop typed at terminal
+       SIGTTIN   21,21,26    Stop    Terminal input for background process
+       SIGTTOU   22,22,27    Stop    Terminal output for background process
+
+       The signals SIGKILL and SIGSTOP cannot be caught, blocked, or ignored.
+
+       Next the signals not in the POSIX.1-1990 standard but described in SUSv2 and POSIX.1-2001.
+
+       Signal       Value     Action   Comment
+       ────────────────────────────────────────────────────────────────────
+       SIGBUS      10,7,10     Core    Bus error (bad memory access)
+       SIGPOLL                 Term    Pollable event (Sys V).
+                                       Synonym for SIGIO
+       SIGPROF     27,27,29    Term    Profiling timer expired
+       SIGSYS      12,31,12    Core    Bad argument to routine (SVr4)
+       SIGTRAP        5        Core    Trace/breakpoint trap
+       SIGURG      16,23,21    Ign     Urgent condition on socket (4.2BSD)
+       SIGVTALRM   26,26,28    Term    Virtual alarm clock (4.2BSD)
+       SIGXCPU     24,24,30    Core    CPU time limit exceeded (4.2BSD)
+       SIGXFSZ     25,25,31    Core    File size limit exceeded (4.2BSD)
+```
 
 Hence, in this post, i wish to delineate these terms by consolidating my findings from stackoverflow, wikipedia and other unix internals websites. Here it goes:
 
@@ -252,12 +296,12 @@ The sigaction(2) function is a better way to set the signal action. It has the p
 int sigaction (int signum, const struct sigaction *act, struct sigaction *oldact);
 ```
 As you can see you don't pass the pointer to the signal handler directly, but instead a struct sigaction object. It's defined as:
-```
+```C
 struct sigaction {
         void     (*sa_handler)(int);
         void     (*sa_sigaction)(int, siginfo_t *, void *);
-        sigset_t   sa_mask;
-        int        sa_flags;
+        sigset_t sa_mask;
+        int      sa_flags;
         void     (*sa_restorer)(void);
 };
 ```
