@@ -58,13 +58,31 @@ $ make
 6. --The End--
 
 ## How to creare new sub-proj
+
 ```
-# if create new test1 dir
-cd test1
-ln -s ../Makefile Makefile
-# edit your currentfile
-vi main.mk
+  # if create new test1 dir
+  cd test1
+  ln -s ../Makefile Makefile
+  # edit your currentfile
+  vi main.mk
 ```
+
+# Info: printf
+
+The stdout stream is buffered, so will only display what's in the buffer after it reaches a newline (or when it's told to). You have a few options to print immediately:
+
+Print to stderr instead using fprintf:
+
+    fprintf(stderr, "I will be printed immediately");
+
+Flush stdout whenever you need it to using fflush:
+
+    printf("Buffered, will be flushed");
+    fflush(stdout); // Will now print everything in the stdout buffer
+
+Edit: From Andy Ross's comment below, you can also disable buffering on stdout by using setbuf:
+
+    setbuf(stdout, NULL);
 
 # TODOS
 
