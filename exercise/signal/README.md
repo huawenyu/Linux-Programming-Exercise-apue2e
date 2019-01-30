@@ -670,6 +670,10 @@ signalfd(2) is a quite new Linux specific call available from the 2.6.22 kernel 
 This allows to handle signals in a synchronous way, without providing handler functions. Let's see an example of signalfd() use
 First we must block the signals we want to handle with signalfd(2) using sigprocmask(2).
 This function will be described later.
+
+    在信号屏蔽过程中，出现的所有被屏蔽的信号，不管发生多少次，
+    在信号解除屏蔽后，系统会执行一次被屏蔽信号上的操作。
+
 Then we call signalfd(2) to create a file descriptor that will be used to read incoming signals.
 At this point in case of SIGTERM or SIGINT delivered to your program it will not be interrupted, no handler will be called.
 It will be queued and you can read information about it from the sfd descriptor.
