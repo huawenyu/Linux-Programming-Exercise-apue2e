@@ -706,7 +706,7 @@ You handle the signal when you are ready for that because your program is not in
   	sigaddset (&mask, SIGTERM);
   	sigaddset (&mask, SIGINT);
 
-  	/* Block the signals thet we handle using signalfd(), so they don't
+  	/* Block the signals that we handle using signalfd(), so they don't
   	 * cause signal handlers or default signal actions to execute. */
   	if (sigprocmask(SIG_BLOCK, &mask, NULL) < 0) {
   		perror ("sigprocmask");
