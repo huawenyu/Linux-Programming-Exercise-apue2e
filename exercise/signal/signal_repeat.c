@@ -3,6 +3,9 @@
   #include "stdlib.h"
   #include <signal.h>
 
+  //#define MY_SIGTEST  SIGUSR1
+  #define MY_SIGTEST  34
+
   /* For a real-world program, printing from a signal handler is not very safe.
    * A signal handler should do as little as it can, preferably only setting a flag here or there.
    * And the flag should be declared `volatile`.
@@ -23,7 +26,7 @@
 
       printf("\nchild signal handler %d\n", cnt++);
       // The old style should install the handler again.
-      signal(SIGUSR1, childHandler);
+      signal(MY_SIGTEST, childHandler);
   }
 
   static void childHandler2(int sig, siginfo_t *siginfo, void *context)
@@ -53,13 +56,13 @@
           sleep(3);
           for (int i=0; i < 100; i++) {
               //sleep(1);
-              kill(val, SIGUSR1);
+              kill(val, MY_SIGTEST);
           }
           printf("\nparent exit\n");
       } else {
           struct sigaction act;
 
-          signal(SIGUSR1, childHandler);
+          signal(MY_SIGTEST, childHandler);
 
           /*
           memset (&act, '\0', sizeof(act));
@@ -67,7 +70,7 @@
           act.sa_sigaction = &childHandler2;
           // The SA_SIGINFO flag tells sigaction() to use the sa_sigaction field, not sa_handler.
           act.sa_flags = SA_SIGINFO;
-          sigaction(SIGUSR1, &act, NULL);
+          sigaction(MY_SIGTEST, &act, NULL);
           */
 
           printf("\nchild\n");
