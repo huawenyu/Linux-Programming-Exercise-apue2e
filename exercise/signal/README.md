@@ -21,7 +21,15 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# Signal
+# Doc
+
+https://www.win.tue.nl/~aeb/linux/lk/lk-5.html
+https://unix.stackexchange.com/questions/80044/how-signals-work-internally
+https://stackoverflow.com/questions/223644/what-is-an-uninterruptible-process
+https://csresources.github.io/SystemProgrammingWiki/SystemProgramming/Signals,-Part-2:-Pending-Signals-and-Signal-Masks/
+
+Discuss:
+https://linux-kernel.vger.kernel.narkive.com/NcXiGeBf/lack-of-documentation-about-sa-restart
 
 ## Send signals
 
@@ -36,6 +44,64 @@ On Unix systems, there are several ways to send signals:
     + with a keyboard sequence (like control-C),
     + timers and child process termination.
 
+## Samples
+
+### A basic/simple signal handler sample by `signal`
+
+```c
+  #include<stdio.h>
+  #include<signal.h>
+  #include<unistd.h>
+
+  void sig_handler(int signo)
+  {
+      if (signo == SIGINT)
+          printf("received SIGINT\n");
+  }
+
+  int main(void)
+  {
+      printf("This is pid %d\n", getpid());
+
+      if (signal(SIGINT, sig_handler) == SIG_ERR)
+          printf("\ncan't catch SIGINT\n");
+      // A long long wait so that we can easily issue a signal to this process
+      while(1)
+          sleep(1);
+      return 0;
+  }
+```
+
+### Another sample by `sigaction`:
+
+```c
+  #include <stdio.h>
+  #include <signal.h>
+  #include<unistd.h>
+
+  static void pSigHandler(int signo)
+  {
+      switch (signo) {
+          case SIGTSTP:
+              printf("TSTP");
+              fflush(stdout);
+              break;
+      }
+  }
+
+  int main(void)
+  {
+      struct sigaction psa;
+
+      printf("This is pid %d\n", getpid());
+
+      psa.sa_handler = pSigHandler;
+      sigaction(SIGTSTP, &psa, NULL);
+      for(;;) {}
+      return 0;
+  }
+```
+
 ## Handle Signal
 
 https://ph7spot.com/introduction-unix-signals-system-calls/
@@ -43,19 +109,21 @@ https://ph7spot.com/introduction-unix-signals-system-calls/
 So a signal is an asynchronous message, but what happens exactly when a process receives it? Well… it depends.
 For each signal, a process can instruct the Kernel to either:
 
-- Ignore this signal: In which case this signal has absolutely no effect on the process. Ignoring the signal must be explicitly requested before the signal is delivered. Also, some signals cannot be ignored.
+- Ignore this signal: In which case this signal has absolutely no effect on the process. Ignoring the signal must be explicitly requested before the signal is delivered. Also, some signals cannot be ignored (e.g. SIGKILL, SIGSTOP).
 - Catch this signal: In which case the Kernel will call a custom routine, as defined by this process when delivering the signal. The process must explicitly register this custom routine before the signal is delivered. The signal-catching function is traditionally called a custom signal handler.
-- Let the default action apply: For each signal the system defines a default action that will be called if the process did not explicitly request to ignore or catch this signal. Thedefault signal handler typically but not always terminates the process (we will cover the default actions for all common UNIX signals later in this article). Letting the default action apply is the implicit system behavior, but it can also be requested explicitly by a process.
+- Let the default action apply: For each signal the system defines a default action that will be called if the process did not explicitly request to ignore or catch this signal. The default signal handler typically but not always terminates the process.
 
 When a pending signal is detected by the Kernel, the system will deliver the signal by performing one of the following actions:
 
-- if the signal is SIGKILL the system does not switch back to user mode. It processes the signal in Kernel mode and terminates the process. This is why kill&nbsp;-9 is such a bulletproof way to terminate a misbehaving process.
-- if the signal is SIGSTOP the system also stays in Kernel mode. Its suspends the process and puts it to sleep.
-- if the process did not register any custom handler for this signal, the default system action is taken. If the default action is to ignore the signal, no action is taken, and the system just switches back to user mode and transfers control to the process. If the default action is not to ignore the signal, the system remains in Kernel mode and the process will exit, dump core, or be suspended. For instance, the default behavior for theSIGSEGV signal is to dump a core file and terminate the process, so that one can analyze the bug that triggered the segmentation fault.
+- if the signal is `SIGKILL` the system does not switch back to user mode. It processes the signal in Kernel mode and terminates the process. This is why `kill -9` is such a bulletproof way to terminate a misbehaving process.
+- if the signal is `SIGSTOP` the system also stays in Kernel mode. Its suspends the process and puts it to sleep.
+- if the process did not register any custom handler for this signal, the default system action is taken:
+  + If the default action is to ignore the signal, no action is taken, and the system just switches back to user mode and transfers control to the process.
+  + If the default action is not to ignore the signal, the system remains in Kernel mode and the process will exit, dump core, or be suspended. For instance, the default behavior for the `SIGSEGV` signal is to dump a core file and terminate the process, so that one can analyze the bug that triggered the segmentation fault.
 - if the process registered a custom handler for the signal, the Kernel transfers control to the process and the custom signal handler is executed in user mode. At this point, the program is the one responsible for handling the signal properly.
 
-A crucial point here is
-- to realize that the Kernel triggers the signal handler at the time when the signal is delivered, not when the signal is generated.
+A crucial point here is:
+- the Kernel triggers the signal handler at the time when the signal is delivered, not when the signal is generated.
 - As signal delivery only happens when the system schedules the target process as active in a multitasking system (just before switching back to User Mode)
    there can be a significant delay between signal generation and delivery.
 
@@ -76,7 +144,7 @@ Finally a process has one last option when it comes to signals:
       SigIgn: 0000000000380004
       SigCgt: 000000004b817efb
 
-  First, let’s look at the definitions of each of these fields.
+  First, let's look at the definitions of each of these fields.
 
     SigQ   – Two slash-separated numbers that relate to queued signals for the real user ID of this process
     SigPnd – Number of pending signals for the thread and the process as a whole
@@ -84,8 +152,8 @@ Finally a process has one last option when it comes to signals:
     SigIgn – Signals being ignored
     SigCgt – Signals being caught
 
-  Next, let’s dig a little deeper. Looking at just the signals caught:
-
+  Next, let's dig a little deeper. Looking at just the signals caught:
+```sh
     $ echo 4b817efb | xxd -r -p | xxd -b
       00000000: 01001011 10000001 01111110 11111011
 
@@ -110,36 +178,43 @@ Finally a process has one last option when it comes to signals:
        |  | +------------------------------ 26 SIGTTIN (terminal input)
        |  +-------------------------------- 28 SIGVTALRM (timer expiration)
        +----------------------------------- 31 SIGXFSZ (file size exceeded)
-
+```
   Catching a signal requires that a signal handling function exists in the process to handle a given signal.
   The SIGKILL (9) and SIGSTOP (#) signals cannot be ignored or caught.
 
   For example, , you would include something like this in your source code:
 
       signal(SIGINT, SIG_IGN); // if you wanted to tell the kernel that ctrl-C's are to be ignored
-
       signal(SIGSEGV, SIG_DFL);// To ensure that the default action for a signal is taken, you would do something like this instead:
 
   The SigIgn (signal ignore) settings from the example above show that only four signals
       3 (SIGQUIT) and 20-22 (SIGWINCH, SIGURG, and SIGPOLL) are set to be ignored,
       while the SigBlk (signal block) settings block only the SIGPIPE
 
+```sh
       $ echo 380004 | xxd -r -p | xxd -b
       00000000: 00111000 00000000 00000100
 
       $ echo 10000 | xxd -r -p | xxd -b
       00000000: 00010000 00000000
-
+```
   The same type of data for a watchdog process looks very different. Notice that it’s ignoring all signals.
 
+```sh
       # cat /proc/11/status | grep Sig
         SigQ:   0/15432
         SigPnd: 0000000000000000
         SigBlk: 0000000000000000
         SigIgn: ffffffffffffffff
         SigCgt: 0000000000000000
+```
 
-## Signals list
+## Signals / signal-safety
+
+The signal safety function list:
+https://man7.org/linux/man-pages/man7/signal-safety.7.html
+
+Careful calling sprintf() in the context of a signal handler, it's not guaranteed to be reentrant; see `man 7 signal-safety`
 
 ```c
        First the signals described in the original POSIX.1-1990 standard.
@@ -619,6 +694,7 @@ We've seen that the siginfo_t structure contains si_pid and si_uid fields (PID a
 Compiler optimization and data in signal handler
 
 Let's see the following example:
+
 ```c
   #include <stdio.h>
   #include <unistd.h>
@@ -652,7 +728,8 @@ Let's see the following example:
   }
 ```
 
-What it does? It depends on compiler optimization settings.
+What it does? It depends on compiler optimization settings:
+
   - Without optimization it executes a loop that ends when the process receives SIGTERM or other sgnal that terminates the process and was not handler.
   - When you compile it with the -O3 gcc flag it will not exit even after receiving SIGTERM.
       Why?  because the while loop is optimized in such way that the exit_flag variable is loaded into a processor register once and not read from the memory in the loop.
@@ -993,3 +1070,5 @@ If you create new processes in your program and don't really want to wait until 
   	return 0;
   }
 ```
+
+
