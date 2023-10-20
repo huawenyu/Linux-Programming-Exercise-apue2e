@@ -21,6 +21,10 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
+# TODO
+
+- https://stackoverflow.com/questions/73839162/linux-why-is-a-blocked-and-ignored-signal-pending
+
 # Doc
 
 https://www.win.tue.nl/~aeb/linux/lk/lk-5.html
@@ -411,11 +415,27 @@ Read a discussion for further reference: [When to re-enable signal handlers](htt
     return EXIT_SUCCESS;
   }
 ```
+
+#### signal vs sigaction:
+
 - PS: a user in IRC told me "It's necessary on some platforms (implementation-defined when) with signal(). But sigaction() should avoid that issue." Is this true?
   + The "user in IRC" is mistaken.
   + The signal() function defines the handling of the next received signal only, after which the default handling is reinstated. So it is necessary for the signal handler to call signal() if the program needs to continue handling signals using a non-default handler.
   + signal() is specified in the C standard. sigaction() is not (albeit, it is considered a better approach by some). So, yes, sigaction() will avoid the need for calling signal(). sigaction() also handles situations where a second signal comes in while handling a signal. The potential catch is that sigaction() is also not available on all target systems.
   + There are some signals that cannot be handled. There are also some signals that leave the process in an unpredictable state if the signal handler does not terminate (i.e. if the handler is used to effectively ignore the signal).
+
+#### signal inherits: fork vs execve
+
+  + A child process created via fork() inherits the installed signal handlers of its parent.
+  + During an execve(), signal handlers are reset to the default, but the settings of blocked signals remain unchanged for the newly started process.
+      So, if, for example, you ignored SIGINT, SIGUSR1, or something else in the parent, and the running process is counting on them, this can lead to interesting consequences.
+
+
+### standard signal vs realtime signal: Queueing and delivery semantics for standard signals
+
+If multiple standard signals are pending for a process, the order in which the signals are delivered is unspecified.
+
+Standard signals do not queue. If multiple instances of a standard signal are generated while that signal is blocked, then only one instance of the signal is marked as pending (and the signal will be delivered just once when it is unblocked). In the case where a standard signal is already pending, the siginfo_t structure (see sigaction(2)) associated with that signal is not overwritten on arrival of subsequent instances of the same signal. Thus, the process will receive the information associated with the first instance of the signal.
 
 #### 6. How about just let OS do the left things?
 
