@@ -1,0 +1,11 @@
+Example usage:
+
+    $ mkdir demo
+    $ cd demo
+    $ ../create_lowerfs.sh lower
+    $ ../consh_setup.sh lower .
+    / #
+
+The networking set-up can then be done from a shell outside the container:
+
+    $ ./consh_nw_setup.sh $(pidof busybox) consh 10.0.0.1/24 10.0.0.2/24
