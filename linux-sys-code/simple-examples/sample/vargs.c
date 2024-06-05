@@ -2,7 +2,7 @@
 
 /* This example demonstrates how to create C functions that accept a
    variable number of argList.
- 
+
    One important note: C does not provide a way for you to determine
    how many argList a caller actually used when they called a method
    that accepts a variable number of argList. Therefore, the
@@ -15,7 +15,7 @@
      2) Force the caller to indicate the number of argList in the
      first argument (or one of the other argList that the function
      requires). This concept is demonstrated in sum_count().
- 
+
    In the examples below, all argList are the same type. This
    doesn't necessarily have to be the case!
 
@@ -51,6 +51,7 @@ int sum_end0(int values, ...)
 	return sum;
 }
 
+// Sample 1
 /* Sums a list of integers. The first integer must be the number of
  * integers that follow it. */
 int sum_count(int args, ...)
@@ -79,13 +80,39 @@ int sum_count(int args, ...)
 	return sum;
 }
 
+// Sample 2
+int vout(int max, ...)
+{
+	va_list arg_ptr;
+	va_list args_copy;
+	int args;
+	char *day;
+	va_start(arg_ptr, max);
+	va_copy(args_copy, arg_ptr);
+	args = 0;
+	while(args < max)
+	{
+		day = va_arg(arg_ptr, char *);
+		printf("Day: %s\n", day);
+		args++;
+	}
+	va_end(arg_ptr);
 
+	args = 0;
+	while(args < max)
+	{
+		day = va_arg(args_copy, char *);
+		printf("Day: %s\n", day);
+		args++;
+	}
+	va_end(args_copy);
+}
 
 int main(void)
 {
 	sum_end0(1,2,3,0);
 	sum_count(3, 1,2,3);
-	
+
 	printf("-------------------\n");
 	printf("Check some edge cases:");
 	sum_end0(0);
@@ -100,7 +127,7 @@ int main(void)
 	 * methods. Some of them may have undefined behavior and/or crash
 	 * your program. */
 //	sum_count(3, 1,2,3,4); // Shouldn't crash, but last value not summed
-	
+
 //	sum_count(3, 1,2);         // Might crash.
 //	sum_count(100, 1,2,3);     // Might crash
 //	sum_count(INT_MAX, 1,2,3); // Probably crash.
@@ -111,7 +138,12 @@ int main(void)
 	/* Maybe crash, maybe return successfully if it
 	   reaches something that looks like an 'int' set
 	   to 0. */
-//	sum_end0(1,2,3);  
+//	sum_end0(1,2,3);
+
+	// Sample 2
+	vout(2, "Sat", "Sun");
+	printf("\n");
+	vout(3, "Mon", "Tues", "Wed");
 
 	return 0;
 }
